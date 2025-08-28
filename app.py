@@ -19,6 +19,20 @@ st.markdown(
     "Sube tu archivo **Excel** (.xlsx) con columnas como: `nid`, `fecha`, `categoria`, `aerolinea`, `origen`, `destino`, `titulo`, `url`, etc."
 )
 
+# Estilos responsive básicos (móvil)
+st.markdown(
+    """
+    <style>
+    @media (max-width: 640px) {
+      .block-container {padding-top: 0.5rem; padding-bottom: 1rem; padding-left: 0.6rem; padding-right: 0.6rem;}
+      h1, h2, h3 {line-height: 1.2;}
+      .stMetric {padding: 0.25rem 0.5rem;}
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Fuente de datos
 PUBLIC_XLSX_PATH = "Con_mas_info_recategorized.xlsx"
 source_mode = st.sidebar.selectbox(
@@ -26,6 +40,15 @@ source_mode = st.sidebar.selectbox(
     ["Auto (archivo o base incluida)", "URL pública"],
     help="Auto usa el archivo subido si existe; si no, la base incluida en el repo.",
 )
+
+# Preferencias de visualización
+try:
+    is_mobile = st.sidebar.toggle("Modo móvil (optimiza para celular)", value=True)
+except Exception:
+    is_mobile = st.sidebar.checkbox("Modo móvil (optimiza para celular)", value=True)
+
+top_n_cats = st.sidebar.slider("Top N categorías", 5, 30, 10, step=1, key="top_n_cats")
+top_n_air = st.sidebar.slider("Top N aerolíneas", 5, 30, 10, step=1, key="top_n_air")
 
 url_publica = None
 if source_mode == "URL pública":
@@ -128,6 +151,20 @@ def fetch_url_bytes(url: str) -> Optional[bytes]:
         return r.content
     except Exception:
         return None
+
+# Helper de estilo para figuras Plotly
+def style_fig(fig, height: Optional[int] = None, horizontal: bool = False):
+    fig.update_layout(
+        template="plotly_white",
+        margin=dict(l=10, r=10, t=40, b=10),
+        hovermode=("y" if horizontal else "x"),
+        legend=dict(font=dict(size=10)),
+        title=dict(font=dict(size=16)),
+        height=height,
+    )
+    fig.update_xaxes(automargin=True, tickfont=dict(size=11))
+    fig.update_yaxes(automargin=True, tickfont=dict(size=11))
+    return fig
 
 # Función para crear esquema de colores personalizado
 def get_custom_colors(categories):
@@ -244,66 +281,149 @@ if data_bytes:
     # KPIs
     total = len(df_f)
     st.header(f"📈 KPIs - Total: {total:,} reclamos")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total reclamos", f"{total:,}")
-    with col2:
-        if "categoria" in df_f.columns and df_f["categoria"].notna().any():
-            st.metric("Categorías únicas", df_f["categoria"].nunique())
-    with col3:
-        if "aerolinea" in df_f.columns and df_f["aerolinea"].notna().any():
-            st.metric("Aerolíneas", df_f["aerolinea"].nunique())
-    with col4:
-        if "origen" in df_f.columns and "destino" in df_f.columns:
-            st.metric("Rutas únicas", df_f.groupby(["origen", "destino"]).ngroups)
+
+    if is_mobile:
+        r1c1, r1c2 = st.columns(2)
+        with r1c1:
+            st.metric("Total reclamos", f"{total:,}")
+        with r1c2:
+            if "categoria" in df_f.columns and df_f["categoria"].notna().any():
+                st.metric("Categorías únicas", int(df_f["categoria"].nunique()))
+        r2c1, r2c2 = st.columns(2)
+        with r2c1:
+            if "aerolinea" in df_f.columns and df_f["aerolinea"].notna().any():
+                st.metric("Aerolíneas", int(df_f["aerolinea"].nunique()))
+        with r2c2:
+            if "origen" in df_f.columns and "destino" in df_f.columns:
+                st.metric("Rutas únicas", int(df_f.groupby(["origen", "destino"]).ngroups))
+    else:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total reclamos", f"{total:,}")
+        with col2:
+            if "categoria" in df_f.columns and df_f["categoria"].notna().any():
+                st.metric("Categorías únicas", int(df_f["categoria"].nunique()))
+        with col3:
+            if "aerolinea" in df_f.columns and df_f["aerolinea"].notna().any():
+                st.metric("Aerolíneas", int(df_f["aerolinea"].nunique()))
+        with col4:
+            if "origen" in df_f.columns and "destino" in df_f.columns:
+                st.metric("Rutas únicas", int(df_f.groupby(["origen", "destino"]).ngroups))
 
     # Gráficos principales
     st.subheader("📊 Análisis por categoría y aerolínea")
-    c1, c2 = st.columns(2)
-    
-    with c1:
+    if is_mobile:
+        # Categorías (horizontal, top N)
         if df_f["categoria"].notna().any():
-            cat_counts = df_f.groupby("categoria").size().reset_index(name="reclamos").sort_values("reclamos", ascending=False)
+            cat_counts = (
+                df_f.groupby("categoria").size().reset_index(name="reclamos")
+                .sort_values("reclamos", ascending=False).head(top_n_cats)
+            )
             custom_colors = get_custom_colors(cat_counts["categoria"].tolist())
-            
+            h = max(280, min(700, 40 * len(cat_counts) + 120))
             fig = px.bar(
                 cat_counts,
-                x="categoria", 
-                y="reclamos", 
-                title="Reclamos por categoría",
+                x="reclamos",
+                y="categoria",
+                orientation="h",
+                title=f"Top {top_n_cats} categorías por reclamos",
                 color="categoria",
-                color_discrete_map=custom_colors
+                color_discrete_map=custom_colors,
+                text="reclamos",
             )
-            fig.update_layout(showlegend=False, xaxis_title=None, yaxis_title=None)
-            fig.update_xaxes(categoryorder="total descending")
-            st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        if df_f["aerolinea"].notna().any():
-            fig = px.bar(
-                df_f.groupby("aerolinea").size().reset_index(name="reclamos").sort_values("reclamos", ascending=False),
-                x="aerolinea", y="reclamos", title="Reclamos por aerolínea"
-            )
-            fig.update_xaxes(categoryorder="total descending")
+            fig.update_layout(showlegend=False)
+            fig.update_traces(textposition="outside", cliponaxis=False)
+            style_fig(fig, height=h, horizontal=True)
             st.plotly_chart(fig, use_container_width=True)
 
-    c3, c4 = st.columns(2)
-    with c3:
+        # Aerolíneas (horizontal, top N)
+        if df_f["aerolinea"].notna().any():
+            air_counts = (
+                df_f.groupby("aerolinea").size().reset_index(name="reclamos")
+                .sort_values("reclamos", ascending=False).head(top_n_air)
+            )
+            h = max(280, min(700, 36 * len(air_counts) + 120))
+            fig = px.bar(
+                air_counts,
+                x="reclamos",
+                y="aerolinea",
+                orientation="h",
+                title=f"Top {top_n_air} aerolíneas por reclamos",
+                text="reclamos",
+            )
+            fig.update_traces(textposition="outside", cliponaxis=False)
+            style_fig(fig, height=h, horizontal=True)
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        c1, c2 = st.columns(2)
+        with c1:
+            if df_f["categoria"].notna().any():
+                cat_counts = df_f.groupby("categoria").size().reset_index(name="reclamos").sort_values("reclamos", ascending=False)
+                custom_colors = get_custom_colors(cat_counts["categoria"].tolist())
+                fig = px.bar(
+                    cat_counts,
+                    x="categoria",
+                    y="reclamos",
+                    title="Reclamos por categoría",
+                    color="categoria",
+                    color_discrete_map=custom_colors,
+                )
+                fig.update_layout(showlegend=False, xaxis_title=None, yaxis_title=None)
+                fig.update_xaxes(categoryorder="total descending", tickangle=-35)
+                style_fig(fig)
+                st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            if df_f["aerolinea"].notna().any():
+                air_counts = df_f.groupby("aerolinea").size().reset_index(name="reclamos").sort_values("reclamos", ascending=False)
+                fig = px.bar(
+                    air_counts,
+                    x="aerolinea",
+                    y="reclamos",
+                    title="Reclamos por aerolínea",
+                )
+                fig.update_xaxes(categoryorder="total descending", tickangle=-35)
+                style_fig(fig)
+                st.plotly_chart(fig, use_container_width=True)
+
+    if is_mobile:
         if "dia_semana" in df_f.columns:
             fig = px.bar(
                 df_f.groupby("dia_semana").size().reset_index(name="reclamos"),
                 x="dia_semana", y="reclamos", title="Reclamos por día de la semana"
             )
+            style_fig(fig)
             st.plotly_chart(fig, use_container_width=True)
-    with c4:
         if df_f[["origen","destino"]].notna().values.any():
             rutas = (
                 df_f.groupby(["origen","destino"]).size().reset_index(name="reclamos")
                 .sort_values("reclamos", ascending=False).head(top_n)
             )
             rutas["ruta"] = rutas["origen"].fillna("?") + " → " + rutas["destino"].fillna("?")
+            h = max(300, min(800, 36 * len(rutas) + 120))
             fig = px.bar(rutas, x="reclamos", y="ruta", orientation="h", title=f"Top rutas con más reclamos (Top {top_n})")
+            style_fig(fig, height=h, horizontal=True)
             st.plotly_chart(fig, use_container_width=True)
+    else:
+        c3, c4 = st.columns(2)
+        with c3:
+            if "dia_semana" in df_f.columns:
+                fig = px.bar(
+                    df_f.groupby("dia_semana").size().reset_index(name="reclamos"),
+                    x="dia_semana", y="reclamos", title="Reclamos por día de la semana"
+                )
+                style_fig(fig)
+                st.plotly_chart(fig, use_container_width=True)
+        with c4:
+            if df_f[["origen","destino"]].notna().values.any():
+                rutas = (
+                    df_f.groupby(["origen","destino"]).size().reset_index(name="reclamos")
+                    .sort_values("reclamos", ascending=False).head(top_n)
+                )
+                rutas["ruta"] = rutas["origen"].fillna("?") + " → " + rutas["destino"].fillna("?")
+                h = max(300, min(800, 30 * len(rutas) + 120))
+                fig = px.bar(rutas, x="reclamos", y="ruta", orientation="h", title=f"Top rutas con más reclamos (Top {top_n})")
+                style_fig(fig, height=h, horizontal=True)
+                st.plotly_chart(fig, use_container_width=True)
 
     # Tendencia temporal
     st.subheader("📈 Tendencia temporal")
@@ -315,6 +435,7 @@ if data_bytes:
         # convertir Period -> timestamp para ordenar y mostrar bonito
         serie["anio_mes_str"] = serie["anio_mes"].dt.to_timestamp().dt.strftime("%Y-%m")
         fig = px.line(serie, x="anio_mes_str", y="reclamos", markers=True, title="Reclamos por mes")
+        style_fig(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     # Gráfico de categorías con colores destacados
@@ -334,6 +455,7 @@ if data_bytes:
             color_discrete_map=custom_colors
         )
         fig.update_layout(showlegend=False)
+        style_fig(fig, height=max(320, min(900, 30 * len(cat_counts) + 120)), horizontal=True)
         st.plotly_chart(fig, use_container_width=True)
         
         # Mostrar leyenda de colores especiales (insensible a acentos/mayúsculas)
@@ -359,7 +481,11 @@ if data_bytes:
     table_df = df_f[cols_order].copy() if cols_order else df_f.copy()
     if "fecha" in table_df.columns and pd.api.types.is_datetime64_any_dtype(table_df["fecha"]):
         table_df = table_df.sort_values(by=["fecha"], ascending=False)
-    st.dataframe(table_df)
+    if is_mobile:
+        with st.expander("Ver tabla (móvil)", expanded=False):
+            st.dataframe(table_df.head(300), use_container_width=True)
+    else:
+        st.dataframe(table_df, use_container_width=True)
 
     # Descarga del dataset filtrado
     csv = table_df.to_csv(index=False).encode("utf-8-sig")
