@@ -86,9 +86,16 @@ def load_df(file_bytes: bytes, sheet_name=0) -> pd.DataFrame:
     # normaliza nombres de columnas
     df.columns = [_normalize_colname(c) for c in df.columns]
 
-    # fecha a datetime (si existe)
+    # fecha a datetime (si existe) con heurística para day-first (dd/mm/yyyy)
     if "fecha" in df.columns:
-        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+        raw_fecha = df["fecha"].copy()
+        parsed_std = pd.to_datetime(raw_fecha, errors="coerce", dayfirst=False)
+        parsed_df = pd.to_datetime(raw_fecha, errors="coerce", dayfirst=True)
+        # Elegimos el parseo que produzca más fechas válidas
+        if parsed_df.notna().sum() > parsed_std.notna().sum():
+            df["fecha"] = parsed_df
+        else:
+            df["fecha"] = parsed_std
 
     # columnas esperadas (si faltan, crear)
     for col in ["categoria", "aerolinea", "origen", "destino", "titulo", "url", "nid"]:
